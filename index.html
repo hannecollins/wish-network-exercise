@@ -508,9 +508,16 @@
             </div>
 
             <button class="btn" onclick="saveStudentNames()">Save Student List for Selected Section</button>
-
+            
             <div class="button-group" style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="exportStudentNamesToFile()">Export Student Names to File (for GitHub)</button>
                 <button class="btn btn-secondary" onclick="clearSurveyData()">Clear Survey Data for Selected Section</button>
+            </div>
+
+            <div style="margin-top: 30px; padding: 20px; background: #f0f4ff; border-radius: 8px; border-left: 5px solid #667eea;">
+                <h3 style="margin-bottom: 15px; color: #667eea;">📋 Wish Grant Report</h3>
+                <p style="margin-bottom: 15px; color: #666;">Download a report showing who made each wish and who offered to grant it. Use this to connect students after class.</p>
+                <button class="btn" onclick="downloadWishGrantReport()">Download Wish Grant Report</button>
             </div>
 
             <div id="setupMessage" style="margin-top: 15px;"></div>

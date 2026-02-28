@@ -6,8 +6,8 @@ let pendingTab = null; // Tab waiting for password authentication
 const INSTRUCTOR_PASSWORD = 'password';
 
 // Initialize
-document.addEventListener('DOMContentLoaded', function() {
-    loadData();
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadData();
     // Initialize sections if they don't exist
     ['A', 'B', 'C', 'D'].forEach(section => {
         if (!sectionStudents[section]) {
@@ -18,17 +18,42 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Check if any protected tab is active by default and require authentication
-    const activeTab = document.querySelector('.tab-content.active');
-    if (activeTab) {
-        const tabId = activeTab.id;
-        if (requiresAuth(tabId) && !isAuthenticated()) {
-            // Switch to student tab if protected tab is active
-            switchToTab('wish');
+    // Check for hash URL and switch to appropriate tab
+    const hash = window.location.hash.substring(1); // Remove the #
+    if (hash && ['wish', 'grant', 'setup', 'networks'].includes(hash)) {
+        if (requiresAuth(hash) && !isAuthenticated()) {
+            // Protected tab - show password prompt or redirect to student tab
+            showPasswordPrompt(hash);
+            switchToTab('wish'); // Default to wish tab while waiting for password
+        } else {
+            switchToTab(hash);
+        }
+    } else {
+        // Check if any protected tab is active by default and require authentication
+        const activeTab = document.querySelector('.tab-content.active');
+        if (activeTab) {
+            const tabId = activeTab.id;
+            if (requiresAuth(tabId) && !isAuthenticated()) {
+                // Switch to student tab if protected tab is active
+                switchToTab('wish');
+            }
         }
     }
     
     updateUI();
+});
+
+// Listen for hash changes (when user navigates via QR code or link)
+window.addEventListener('hashchange', function() {
+    const hash = window.location.hash.substring(1);
+    if (hash && ['wish', 'grant', 'setup', 'networks'].includes(hash)) {
+        if (requiresAuth(hash) && !isAuthenticated()) {
+            showPasswordPrompt(hash);
+            switchToTab('wish');
+        } else {
+            switchToTab(hash);
+        }
+    }
 });
 
 // Get current section based on active tab
@@ -168,7 +193,7 @@ function showTab(tabName, buttonElement) {
     switchToTab(tabName);
 }
 
-// Actually switch to a tab (internal function)
+    // Actually switch to a tab (internal function)
 function switchToTab(tabName) {
     // Hide all tabs
     document.querySelectorAll('.tab-content').forEach(tab => {
@@ -207,6 +232,11 @@ function switchToTab(tabName) {
             btn.classList.remove('active');
         }
     });
+    
+    // Update URL hash for QR code navigation
+    if (tabName && ['wish', 'grant', 'setup', 'networks'].includes(tabName)) {
+        window.location.hash = tabName;
+    }
     
     // Update UI when switching tabs
     if (tabName === 'wish') {
@@ -280,6 +310,147 @@ function saveStudentNames() {
     }
     
     showMessage('setupMessage', `Saved ${sectionStudents[section].length} student names for Section ${section}!`, 'success');
+}
+
+// Export student names to a downloadable JSON file (for GitHub)
+function exportStudentNamesToFile() {
+    const dataStr = JSON.stringify(sectionStudents, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'students.json';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    showMessage('setupMessage', 'Student names exported to students.json file. You can commit this file to GitHub.', 'success');
+}
+
+// Download wish grant report showing who granted each wish
+function downloadWishGrantReport() {
+    // Check authentication
+    if (!isAuthenticated()) {
+        showPasswordPrompt('setup');
+        return;
+    }
+
+    let reportContent = 'Wish Grant Report\n';
+    reportContent += '==================\n\n';
+    reportContent += 'This report shows who made each wish and who offered to grant it.\n';
+    reportContent += 'Use this to connect students after class.\n\n';
+    reportContent += 'Generated: ' + new Date().toLocaleString() + '\n';
+    reportContent += '='.repeat(80) + '\n\n';
+    
+    // Process each section
+    ['A', 'B', 'C', 'D'].forEach(section => {
+        const sectionDataForSection = sectionData[section] || {};
+        
+        // Find all students who made wishes
+        const studentsWithWishes = Object.keys(sectionDataForSection).filter(name => {
+            const data = sectionDataForSection[name];
+            return data && data.wish && data.wish.trim() !== '';
+        });
+        
+        if (studentsWithWishes.length === 0) {
+            return; // Skip empty sections
+        }
+        
+        reportContent += `SECTION ${section}\n`;
+        reportContent += '='.repeat(80) + '\n\n';
+        
+        // For each student who made a wish, find who granted it
+        studentsWithWishes.forEach(wishMaker => {
+            const wishData = sectionDataForSection[wishMaker];
+            const wish = wishData.wish || '(No wish entered)';
+            
+            // Find all students who granted this person's wish
+            const granters = Object.keys(sectionDataForSection).filter(granter => {
+                const granterData = sectionDataForSection[granter];
+                return granterData && 
+                       granterData.wishGrants && 
+                       Array.isArray(granterData.wishGrants) &&
+                       granterData.wishGrants.includes(wishMaker);
+            });
+            
+            reportContent += `Wish Maker: ${wishMaker}\n`;
+            reportContent += `Wish: ${wish}\n`;
+            
+            if (granters.length > 0) {
+                reportContent += `Granted by (${granters.length}): ${granters.join(', ')}\n`;
+            } else {
+                reportContent += `Granted by: (No one has offered to grant this wish yet)\n`;
+            }
+            
+            reportContent += '\n' + '-'.repeat(80) + '\n\n';
+        });
+        
+        reportContent += '\n';
+    });
+    
+    // Also create CSV version
+    let csvContent = 'Section,Student Name,Wish,Number of Granters,Granters\n';
+    
+    ['A', 'B', 'C', 'D'].forEach(section => {
+        const sectionDataForSection = sectionData[section] || {};
+        const studentsWithWishes = Object.keys(sectionDataForSection).filter(name => {
+            const data = sectionDataForSection[name];
+            return data && data.wish && data.wish.trim() !== '';
+        });
+        
+        studentsWithWishes.forEach(wishMaker => {
+            const wishData = sectionDataForSection[wishMaker];
+            const wish = wishData.wish || '(No wish entered)';
+            
+            const granters = Object.keys(sectionDataForSection).filter(granter => {
+                const granterData = sectionDataForSection[granter];
+                return granterData && 
+                       granterData.wishGrants && 
+                       Array.isArray(granterData.wishGrants) &&
+                       granterData.wishGrants.includes(wishMaker);
+            });
+            
+            // Escape CSV fields (handle quotes and commas)
+            const escapeCSV = (str) => {
+                if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+                    return '"' + str.replace(/"/g, '""') + '"';
+                }
+                return str;
+            };
+            
+            csvContent += `${section},${escapeCSV(wishMaker)},${escapeCSV(wish)},${granters.length},"${granters.join('; ')}"\n`;
+        });
+    });
+    
+    // Download both formats
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    
+    // Download text report
+    const textBlob = new Blob([reportContent], { type: 'text/plain' });
+    const textUrl = URL.createObjectURL(textBlob);
+    const textLink = document.createElement('a');
+    textLink.href = textUrl;
+    textLink.download = `wish-grant-report-${timestamp}.txt`;
+    document.body.appendChild(textLink);
+    textLink.click();
+    document.body.removeChild(textLink);
+    URL.revokeObjectURL(textUrl);
+    
+    // Download CSV report
+    setTimeout(() => {
+        const csvBlob = new Blob([csvContent], { type: 'text/csv' });
+        const csvUrl = URL.createObjectURL(csvBlob);
+        const csvLink = document.createElement('a');
+        csvLink.href = csvUrl;
+        csvLink.download = `wish-grant-report-${timestamp}.csv`;
+        document.body.appendChild(csvLink);
+        csvLink.click();
+        document.body.removeChild(csvLink);
+        URL.revokeObjectURL(csvUrl);
+        
+        showMessage('setupMessage', 'Wish grant report downloaded! Both TXT and CSV formats are available.', 'success');
+    }, 500);
 }
 
 // Update UI elements
@@ -1869,8 +2040,28 @@ function saveData() {
     localStorage.setItem('wishNetworkSectionData', JSON.stringify(sectionData));
 }
 
-// Load from localStorage
-function loadData() {
+// Load from localStorage and students.json file
+async function loadData() {
+    // First, try to load student names from students.json file (for GitHub deployment)
+    try {
+        const response = await fetch('students.json');
+        if (response.ok) {
+            const fileData = await response.json();
+            // Merge file data with existing data (file data is the base, localStorage can override)
+            Object.keys(fileData).forEach(section => {
+                if (fileData[section] && fileData[section].length > 0) {
+                    // Only use file data if localStorage doesn't have data for this section
+                    // This allows instructors to update via the app and have it persist
+                    if (!sectionStudents[section] || sectionStudents[section].length === 0) {
+                        sectionStudents[section] = fileData[section];
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        console.log('Could not load students.json file (this is OK if running locally):', error);
+    }
+
     const savedSectionStudents = localStorage.getItem('wishNetworkSectionStudents');
     const savedSectionData = localStorage.getItem('wishNetworkSectionData');
 
@@ -1884,10 +2075,14 @@ function loadData() {
         }
     });
 
+    // Load from localStorage (takes precedence over file for student names)
     if (savedSectionStudents) {
         const parsed = JSON.parse(savedSectionStudents);
         Object.keys(parsed).forEach(section => {
-            sectionStudents[section] = parsed[section];
+            // Only override if localStorage has data (instructor may have updated via app)
+            if (parsed[section] && parsed[section].length > 0) {
+                sectionStudents[section] = parsed[section];
+            }
         });
     }
 
