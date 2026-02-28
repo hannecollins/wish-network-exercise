@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wish Network Exercise</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .tabs {
+            display: flex;
+            background: #f5f5f5;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px 20px;
+            background: #f5f5f5;
+            border: none;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+        }
+
+        .tab:hover {
+            background: #e8e8e8;
+        }
+
+        .tab.active {
+            background: white;
+            border-bottom: 3px solid #667eea;
+            color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+            font-size: 1em;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 6px;
+            border: 2px solid #ddd;
+            transition: all 0.3s;
+        }
+
+        .checkbox-item:hover {
+            border-color: #667eea;
+            background: #f0f0ff;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: auto;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.1em;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .btn-secondary:hover {
+            box-shadow: 0 5px 15px rgba(108, 117, 125, 0.4);
+        }
+
+        .community-legend {
+            background: #f9f9f9;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .community-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .community-legend-color {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: 2px solid #333;
+            flex-shrink: 0;
+        }
+
+        .community-legend-text {
+            flex: 1;
+            font-size: 0.95em;
+        }
+
+        .community-legend-label {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 2px;
+        }
+
+        .community-legend-percentage {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .network-container {
+            margin-top: 20px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            height: 600px;
+            background: #fafafa;
+        }
+
+        .network-overlap-box {
+            background: linear-gradient(135deg, #f0f4ff 0%, #e8f0ff 100%);
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .network-overlap-box h4 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .network-overlap-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .overlap-stat-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+
+        .overlap-stat-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .overlap-stat-value {
+            font-size: 1.5em;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .overlap-stat-description {
+            font-size: 0.85em;
+            color: #888;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        .data-section {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .data-section h3 {
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .student-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .student-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 2px solid #ddd;
+        }
+
+        .student-card strong {
+            color: #667eea;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .student-card .wish {
+            color: #666;
+            font-style: italic;
+            margin-top: 5px;
+        }
+
+        .wish-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 3px solid #ddd;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 15px;
+        }
+
+        .wish-card:hover {
+            border-color: #667eea;
+            background: #f0f0ff;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+
+        .wish-card.selected {
+            border-color: #764ba2;
+            background: #f5e6ff;
+            box-shadow: 0 4px 12px rgba(118, 75, 162, 0.3);
+        }
+
+        .wish-card .wish-text {
+            color: #333;
+            font-size: 1.1em;
+            font-style: italic;
+        }
+
+        .instructions {
+            background: #e8f4f8;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .instructions h3 {
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+        }
+
+        .instructions li {
+            margin-bottom: 8px;
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .button-group .btn {
+            flex: 1;
+        }
+
+        .password-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .password-overlay.active {
+            display: flex;
+        }
+
+        .password-modal {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .password-modal h3 {
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+
+        .password-modal input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 1em;
+            margin-bottom: 15px;
+        }
+
+        .password-modal input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .password-error {
+            color: #dc3545;
+            margin-bottom: 15px;
+            font-size: 0.9em;
+            display: none;
+        }
+
+        .password-error.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌟 Wish Network Exercise 🌟</h1>
+            <p>Exploring Social Networks and Weak Ties</p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab" onclick="showTab('setup', this)">1. Setup</button>
+            <button class="tab active" onclick="showTab('wish', this)">2. Make a Wish</button>
+            <button class="tab" onclick="showTab('grant', this)">3. Grant Wishes</button>
+            <button class="tab" onclick="showTab('networks', this)">4. Network Diagrams</button>
+        </div>
+
+        <!-- Setup Tab -->
+        <div id="setup" class="tab-content">
+            <div class="instructions">
+                <h3>📋 Instructions for Professor</h3>
+                <ol>
+                    <li><strong>Select Section:</strong> Choose the section you're setting up (A, B, C, or D)</li>
+                    <li><strong>Setup:</strong> Enter all student names in your section (one per line)</li>
+                    <li><strong>Phase 1 - Make a Wish:</strong> Have students fill out:
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>Who they talk to most in the section</li>
+                            <li>Their wish (what they want to learn/do)</li>
+                        </ul>
+                    </li>
+                    <li><strong>Phase 2 - Grant Wishes:</strong> After all wishes are collected, have students:
+                        <ul style="margin-left: 20px; margin-top: 5px;">
+                            <li>View all wishes from their classmates</li>
+                            <li>Select 1-3 wishes they can grant</li>
+                        </ul>
+                    </li>
+                    <li><strong>View Networks:</strong> Generate and display the two network diagrams</li>
+                </ol>
+            </div>
+
+            <div class="form-group">
+                <label for="sectionSetup">Select Section:</label>
+                <select id="sectionSetup" onchange="onSectionChange('setup')">
+                    <option value="">Select a section...</option>
+                    <option value="A">Section A</option>
+                    <option value="B">Section B</option>
+                    <option value="C">Section C</option>
+                    <option value="D">Section D</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="studentNames">Enter Student Names (one per line):</label>
+                <textarea id="studentNames" placeholder="Alice&#10;Bob&#10;Charlie&#10;Diana&#10;..."></textarea>
+                <small id="sectionInfo" style="color: #666; margin-top: 5px; display: block;"></small>
+            </div>
+
+            <button class="btn" onclick="saveStudentNames()">Save Student List for Selected Section</button>
+
+            <div class="button-group" style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="clearSurveyData()">Clear Survey Data for Selected Section</button>
+            </div>
+
+            <div id="setupMessage" style="margin-top: 15px;"></div>
+        </div>
+
+        <!-- Make a Wish Tab -->
+        <div id="wish" class="tab-content active">
+            <div class="instructions">
+                <h3>🌟 Phase 1: Make a Wish</h3>
+                <p><strong>Step 1:</strong> Each student should fill this out. Enter your section, name, who you talk to, and your wish.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="sectionWish">Your Section:</label>
+                <select id="sectionWish" onchange="onSectionChange('wish')">
+                    <option value="">Select your section...</option>
+                    <option value="A">Section A</option>
+                    <option value="B">Section B</option>
+                    <option value="C">Section C</option>
+                    <option value="D">Section D</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="studentNameWish">Your Name:</label>
+                <select id="studentNameWish">
+                    <option value="">Select your name...</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Who do you talk to most in your section? (Select up to 20 people)</label>
+                <div id="closeTiesCount" style="margin-bottom: 10px; padding: 10px; background: #e8f4f8; border-radius: 6px; font-weight: 600; color: #667eea;">
+                    <span id="closeTiesSelected">0</span> of 20 selected
+                </div>
+                <div id="closeTies" class="checkbox-group"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="wishInput">What is your wish? (e.g., "I want to learn how to skateboard")</label>
+                <textarea id="wishInput" placeholder="I want to learn how to..."></textarea>
+            </div>
+
+            <button class="btn" onclick="saveWishData()">Submit My Wish</button>
+
+            <div id="wishMessage" style="margin-top: 15px;"></div>
+        </div>
+
+        <!-- Grant Wishes Tab -->
+        <div id="grant" class="tab-content">
+            <div class="instructions">
+                <h3>🎁 Phase 2: Grant Wishes</h3>
+                <p><strong>Step 2:</strong> Now that you can see everyone's wishes, select 1-3 wishes that you can help grant.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="sectionGrant">Your Section:</label>
+                <select id="sectionGrant" onchange="onSectionChange('grant')">
+                    <option value="">Select your section...</option>
+                    <option value="A">Section A</option>
+                    <option value="B">Section B</option>
+                    <option value="C">Section C</option>
+                    <option value="D">Section D</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="studentNameGrant">Your Name:</label>
+                <select id="studentNameGrant">
+                    <option value="">Select your name...</option>
+                </select>
+            </div>
+
+            <div id="allWishesDisplay" style="margin-top: 20px; display: none;">
+                <h3 style="margin-bottom: 15px; color: #667eea;">All Student Wishes</h3>
+                <p style="margin-bottom: 15px; color: #666; font-size: 0.9em;">Click on up to 3 wishes that you can help grant:</p>
+                <div id="wishesList" class="student-list"></div>
+                <div id="selectedWishesInfo" style="margin-top: 15px; padding: 10px; background: #e8f4f8; border-radius: 6px; display: none;">
+                    <strong>Selected: <span id="selectedCount">0</span> of 3 wishes</strong>
+                </div>
+            </div>
+
+            <button class="btn" onclick="saveGrantData()">Submit My Wish Grants</button>
+
+            <div id="grantMessage" style="margin-top: 15px;"></div>
+
+            <div class="data-section" id="dataPreview" style="display: none; margin-top: 30px;">
+                <h3>📊 Data Management (Professor Only)</h3>
+                <div class="button-group">
+                    <button class="btn btn-secondary" onclick="exportData()">Export Data (JSON)</button>
+                    <button class="btn btn-secondary" onclick="importData()">Import Data (JSON)</button>
+                    <button class="btn btn-secondary" onclick="clearAllData()">Clear All Data</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Networks Tab -->
+        <div id="networks" class="tab-content">
+            <div class="instructions">
+                <h3>🔗 Network Visualizations</h3>
+                <p>These diagrams show the difference between close ties (who you talk to) and wish ties (who grants your wishes).</p>
+            </div>
+
+            <div class="form-group">
+                <label for="sectionNetwork">Select Section:</label>
+                <select id="sectionNetwork" onchange="onSectionChange('network')">
+                    <option value="">Select a section...</option>
+                    <option value="A">Section A</option>
+                    <option value="B">Section B</option>
+                    <option value="C">Section C</option>
+                    <option value="D">Section D</option>
+                </select>
+            </div>
+
+            <div class="button-group">
+                <button class="btn" onclick="generateNetworks()">Generate Network Diagrams</button>
+                <button class="btn btn-secondary" onclick="downloadNetworks()">Download as Images</button>
+            </div>
+
+            <div id="networkOverlapBox" class="network-overlap-box" style="margin-top: 30px; display: none;"></div>
+
+            <div style="margin-top: 30px;">
+                <h3 style="margin-bottom: 15px; color: #667eea;">Close Ties Network</h3>
+                <p style="margin-bottom: 10px; color: #666;">Shows who talks to whom in the section</p>
+                <div id="closeTiesNetwork" class="network-container"></div>
+                <div id="closeTiesLegend" class="community-legend" style="margin-top: 20px; display: none;"></div>
+            </div>
+
+            <div style="margin-top: 40px;">
+                <h3 style="margin-bottom: 15px; color: #667eea;">Wish Ties Network</h3>
+                <p style="margin-bottom: 10px; color: #666;">Shows who grants wishes to whom</p>
+                <div id="wishTiesNetwork" class="network-container"></div>
+                <div id="wishTiesLegend" class="community-legend" style="margin-top: 20px; display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Password Overlay -->
+    <div id="passwordOverlay" class="password-overlay">
+        <div class="password-modal">
+            <h3>🔒 Instructor Access</h3>
+            <p style="margin-bottom: 15px; color: #666;">Please enter the password to access this page:</p>
+            <input type="password" id="passwordInput" placeholder="Enter password" onkeypress="handlePasswordKeyPress(event)">
+            <div id="passwordError" class="password-error">Incorrect password. Please try again.</div>
+            <button class="btn" onclick="checkPassword()">Submit</button>
+            <button class="btn btn-secondary" onclick="cancelPassword()" style="margin-top: 10px;">Cancel</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
