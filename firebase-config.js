@@ -9,6 +9,10 @@
 //
 // If you don't configure Firebase, the app will use localStorage (data stored locally in each browser)
 
+// IMPORTANT: This file contains sensitive credentials and should NOT be committed to GitHub
+// If you're setting this up, copy firebase-config.js.example and add your own credentials
+// For existing deployments, this file should be added to .gitignore
+
 window.firebaseConfig = {
     apiKey: "AIzaSyALbwOBwIPDJrfHZR6giOe7NCwdhCtVqzU",
     authDomain: "wish-network.firebaseapp.com",

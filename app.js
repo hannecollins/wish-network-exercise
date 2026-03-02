@@ -668,14 +668,13 @@ function updateWishTab() {
                 
                 // Add change event listener to enforce 20 person limit
                 checkbox.addEventListener('change', function() {
-                    updateCloseTiesCount();
                     const checkedCount = document.querySelectorAll('#closeTies input[type="checkbox"]:checked').length;
-                    if (checkedCount >= 20 && this.checked) {
-                        // If already at limit and trying to check another, prevent it
+                    if (checkedCount > 20 && this.checked) {
+                        // If already over limit, prevent checking this one
                         this.checked = false;
                         showMessage('wishMessage', 'You can only select up to 20 people. Please uncheck someone else first.', 'error');
-                        updateCloseTiesCount();
                     }
+                    updateCloseTiesCount();
                 });
                 
                 const label = document.createElement('label');
