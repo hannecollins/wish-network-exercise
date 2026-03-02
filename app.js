@@ -2147,7 +2147,7 @@ function importData() {
 }
 
 // Clear survey data for selected section (keeps student names)
-function clearSurveyData() {
+async function clearSurveyData() {
     const section = getCurrentSection('setup');
     if (!section) {
         showMessage('setupMessage', 'Please select a section first.', 'error');
@@ -2158,7 +2158,45 @@ function clearSurveyData() {
         // Clear all survey data for this section
         sectionData[section] = {};
         
-        saveData();
+        // Save to both localStorage and Firebase
+        await saveData();
+        
+        // Also explicitly clear Firebase data for this section if Firebase is enabled
+        if (window.firebaseEnabled && window.firestore) {
+            try {
+                const firestoreModule = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+                const { doc, setDoc } = firestoreModule;
+                
+                // Update the sectionData document in Firebase with the cleared section
+                // We need to reload the full sectionData first, then update just this section
+                const dataDoc = doc(window.firestore, 'data', 'sectionData');
+                const { getDoc } = firestoreModule;
+                const currentDoc = await getDoc(dataDoc);
+                
+                if (currentDoc.exists()) {
+                    const currentData = currentDoc.data();
+                    if (currentData.data) {
+                        // Update just this section in the data
+                        currentData.data[section] = {};
+                        await setDoc(dataDoc, {
+                            data: currentData.data,
+                            updatedAt: new Date().toISOString()
+                        });
+                        console.log(`Cleared Firebase data for Section ${section}`);
+                    }
+                } else {
+                    // Document doesn't exist yet, create it with empty section
+                    await setDoc(dataDoc, {
+                        data: sectionData,
+                        updatedAt: new Date().toISOString()
+                    });
+                }
+            } catch (error) {
+                console.error('Error clearing Firebase data:', error);
+                // Still show success message since localStorage was cleared
+            }
+        }
+        
         updateUI();
         showMessage('setupMessage', `Survey data cleared for Section ${section}. Student names have been preserved.`, 'success');
     }
