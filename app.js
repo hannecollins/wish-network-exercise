@@ -8,6 +8,7 @@ const INSTRUCTOR_PASSWORD = 'password';
 // Firebase helpers
 async function saveToFirebase() {
     if (!window.firebaseEnabled || !window.firestore) {
+        console.log('Firebase not enabled or not initialized');
         return false; // Firebase not configured
     }
     
@@ -16,21 +17,26 @@ async function saveToFirebase() {
         const firestoreModule = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
         const { doc, setDoc } = firestoreModule;
         
+        console.log('Saving to Firebase...', { sectionStudents, sectionData });
+        
         // Save student names
         await setDoc(doc(window.firestore, 'data', 'sectionStudents'), {
             data: sectionStudents,
             updatedAt: new Date().toISOString()
         });
+        console.log('Saved sectionStudents to Firebase');
         
         // Save section data
         await setDoc(doc(window.firestore, 'data', 'sectionData'), {
             data: sectionData,
             updatedAt: new Date().toISOString()
         });
+        console.log('Saved sectionData to Firebase');
         
         return true;
     } catch (error) {
         console.error('Error saving to Firebase:', error);
+        console.error('Error details:', error.message, error.code);
         return false;
     }
 }
@@ -99,6 +105,57 @@ async function loadFromFirebase() {
         return false;
     }
 }
+
+// Test Firebase connection (can be called from browser console)
+window.testFirebase = async function() {
+    console.log('Testing Firebase connection...');
+    console.log('Firebase enabled:', window.firebaseEnabled);
+    console.log('Firestore instance:', window.firestore);
+    
+    if (!window.firebaseEnabled || !window.firestore) {
+        console.error('Firebase not initialized!');
+        return;
+    }
+    
+    try {
+        const firestoreModule = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+        const { doc, setDoc, getDoc } = firestoreModule;
+        
+        // Try to write a test document
+        const testDoc = doc(window.firestore, 'test', 'connection');
+        await setDoc(testDoc, {
+            message: 'Firebase is working!',
+            timestamp: new Date().toISOString()
+        });
+        console.log('✅ Successfully wrote test document to Firestore');
+        
+        // Try to read it back
+        const testRead = await getDoc(testDoc);
+        if (testRead.exists()) {
+            console.log('✅ Successfully read test document:', testRead.data());
+        } else {
+            console.error('❌ Test document not found after writing');
+        }
+        
+        // Try to save actual data
+        console.log('Attempting to save actual data...');
+        const result = await saveToFirebase();
+        if (result) {
+            console.log('✅ Successfully saved data to Firestore');
+        } else {
+            console.error('❌ Failed to save data to Firestore');
+        }
+        
+    } catch (error) {
+        console.error('❌ Firebase test failed:', error);
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
+        if (error.code === 'permission-denied') {
+            console.error('⚠️ PERMISSION DENIED - Check your Firestore security rules!');
+            console.error('See FIRESTORE_SECURITY_RULES.md for instructions');
+        }
+    }
+};
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async function() {
@@ -2136,7 +2193,24 @@ async function saveData() {
     localStorage.setItem('wishNetworkSectionData', JSON.stringify(sectionData));
     
     // Also save to Firebase if enabled
-    await saveToFirebase();
+    // Wait a bit to ensure Firebase is initialized
+    if (window.firebaseEnabled) {
+        // Wait for Firebase to be ready (max 2 seconds)
+        let attempts = 0;
+        while (!window.firestore && attempts < 20) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
+        }
+        
+        if (window.firestore) {
+            const saved = await saveToFirebase();
+            if (!saved) {
+                console.warn('Failed to save to Firebase, but data saved to localStorage');
+            }
+        } else {
+            console.warn('Firestore not ready after waiting, saving to localStorage only');
+        }
+    }
 }
 
 // Load from Firebase (if enabled), localStorage, and students.json file

@@ -679,8 +679,8 @@
         window.firestore = null;
         window.firebaseEnabled = false;
         
-        // Initialize Firebase after a short delay to ensure firebase-config.js is loaded
-        setTimeout(() => {
+        // Function to initialize Firebase
+        function initFirebase() {
             try {
                 const firebaseConfig = window.firebaseConfig;
                 if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== 'YOUR_API_KEY') {
@@ -688,6 +688,7 @@
                     window.firestore = getFirestore(window.firebaseApp);
                     window.firebaseEnabled = true;
                     console.log('Firebase initialized successfully');
+                    console.log('Firestore instance:', window.firestore);
                 } else {
                     window.firebaseEnabled = false;
                     console.log('Firebase not configured - using localStorage fallback');
@@ -696,7 +697,22 @@
                 window.firebaseEnabled = false;
                 console.log('Firebase initialization failed - using localStorage fallback:', error);
             }
-        }, 100);
+        }
+        
+        // Try to initialize immediately, then retry if config not loaded yet
+        if (window.firebaseConfig) {
+            initFirebase();
+        } else {
+            // Wait for firebase-config.js to load
+            let attempts = 0;
+            const checkConfig = setInterval(() => {
+                attempts++;
+                if (window.firebaseConfig || attempts > 50) {
+                    clearInterval(checkConfig);
+                    initFirebase();
+                }
+            }, 100);
+        }
     </script>
     <script src="app.js"></script>
 </body>
