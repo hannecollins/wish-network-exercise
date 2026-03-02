@@ -5,6 +5,101 @@ let currentSection = ''; // Currently selected section
 let pendingTab = null; // Tab waiting for password authentication
 const INSTRUCTOR_PASSWORD = 'password';
 
+// Firebase helpers
+async function saveToFirebase() {
+    if (!window.firebaseEnabled || !window.firestore) {
+        return false; // Firebase not configured
+    }
+    
+    try {
+        // Dynamically import Firebase functions
+        const firestoreModule = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+        const { doc, setDoc } = firestoreModule;
+        
+        // Save student names
+        await setDoc(doc(window.firestore, 'data', 'sectionStudents'), {
+            data: sectionStudents,
+            updatedAt: new Date().toISOString()
+        });
+        
+        // Save section data
+        await setDoc(doc(window.firestore, 'data', 'sectionData'), {
+            data: sectionData,
+            updatedAt: new Date().toISOString()
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('Error saving to Firebase:', error);
+        return false;
+    }
+}
+
+async function loadFromFirebase() {
+    if (!window.firebaseEnabled || !window.firestore) {
+        return false; // Firebase not configured
+    }
+    
+    try {
+        // Dynamically import Firebase functions
+        const firestoreModule = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
+        const { doc, getDoc, onSnapshot } = firestoreModule;
+        
+        // Load initial data
+        const studentsDoc = await getDoc(doc(window.firestore, 'data', 'sectionStudents'));
+        const dataDoc = await getDoc(doc(window.firestore, 'data', 'sectionData'));
+        
+        if (studentsDoc.exists()) {
+            const data = studentsDoc.data();
+            if (data.data) {
+                Object.assign(sectionStudents, data.data);
+            }
+        }
+        
+        if (dataDoc.exists()) {
+            const data = dataDoc.data();
+            if (data.data) {
+                Object.assign(sectionData, data.data);
+            }
+        }
+        
+        // Set up real-time listeners
+        onSnapshot(doc(window.firestore, 'data', 'sectionStudents'), (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data();
+                if (data.data) {
+                    Object.assign(sectionStudents, data.data);
+                    updateUI();
+                }
+            }
+        });
+        
+        onSnapshot(doc(window.firestore, 'data', 'sectionData'), (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data();
+                if (data.data) {
+                    Object.assign(sectionData, data.data);
+                    updateUI();
+                    // Update tabs if they're visible
+                    const activeTab = document.querySelector('.tab-content.active');
+                    if (activeTab) {
+                        if (activeTab.id === 'wish') {
+                            updateWishTab();
+                        } else if (activeTab.id === 'grant') {
+                            updateGrantTab();
+                        }
+                    }
+                }
+            }
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('Error loading from Firebase:', error);
+        return false;
+    }
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', async function() {
     await loadData();
@@ -2034,24 +2129,44 @@ function showMessage(elementId, message, type) {
     }, 5000);
 }
 
-// Save to localStorage
-function saveData() {
+// Save to Firebase (if enabled) and localStorage (as fallback)
+async function saveData() {
+    // Always save to localStorage as fallback
     localStorage.setItem('wishNetworkSectionStudents', JSON.stringify(sectionStudents));
     localStorage.setItem('wishNetworkSectionData', JSON.stringify(sectionData));
+    
+    // Also save to Firebase if enabled
+    await saveToFirebase();
 }
 
-// Load from localStorage and students.json file
+// Load from Firebase (if enabled), localStorage, and students.json file
 async function loadData() {
-    // First, try to load student names from students.json file (for GitHub deployment)
+    // Initialize sections
+    ['A', 'B', 'C', 'D'].forEach(section => {
+        if (!sectionStudents[section]) {
+            sectionStudents[section] = [];
+        }
+        if (!sectionData[section]) {
+            sectionData[section] = {};
+        }
+    });
+    
+    // Try to load from Firebase first (if enabled)
+    const firebaseLoaded = await loadFromFirebase();
+    
+    // If Firebase loaded successfully, it will have set up real-time listeners
+    // and populated sectionStudents and sectionData
+    // We still want to merge with students.json and localStorage as fallback
+    
+    // Load student names from students.json file (for GitHub deployment)
     try {
         const response = await fetch('students.json');
         if (response.ok) {
             const fileData = await response.json();
-            // Merge file data with existing data (file data is the base, localStorage can override)
+            // Merge file data with existing data (file data is the base, Firebase/localStorage can override)
             Object.keys(fileData).forEach(section => {
                 if (fileData[section] && fileData[section].length > 0) {
-                    // Only use file data if localStorage doesn't have data for this section
-                    // This allows instructors to update via the app and have it persist
+                    // Only use file data if we don't have data for this section yet
                     if (!sectionStudents[section] || sectionStudents[section].length === 0) {
                         sectionStudents[section] = fileData[section];
                     }
@@ -2062,51 +2177,44 @@ async function loadData() {
         console.log('Could not load students.json file (this is OK if running locally):', error);
     }
 
-    const savedSectionStudents = localStorage.getItem('wishNetworkSectionStudents');
-    const savedSectionData = localStorage.getItem('wishNetworkSectionData');
+    // Load from localStorage (as fallback if Firebase not enabled, or for initial load)
+    if (!firebaseLoaded) {
+        const savedSectionStudents = localStorage.getItem('wishNetworkSectionStudents');
+        const savedSectionData = localStorage.getItem('wishNetworkSectionData');
 
-    // Initialize sections
-    ['A', 'B', 'C', 'D'].forEach(section => {
-        if (!sectionStudents[section]) {
-            sectionStudents[section] = [];
+        // Load from localStorage (takes precedence over file for student names)
+        if (savedSectionStudents) {
+            const parsed = JSON.parse(savedSectionStudents);
+            Object.keys(parsed).forEach(section => {
+                // Only override if localStorage has data (instructor may have updated via app)
+                if (parsed[section] && parsed[section].length > 0) {
+                    sectionStudents[section] = parsed[section];
+                }
+            });
         }
-        if (!sectionData[section]) {
-            sectionData[section] = {};
-        }
-    });
 
-    // Load from localStorage (takes precedence over file for student names)
-    if (savedSectionStudents) {
-        const parsed = JSON.parse(savedSectionStudents);
-        Object.keys(parsed).forEach(section => {
-            // Only override if localStorage has data (instructor may have updated via app)
-            if (parsed[section] && parsed[section].length > 0) {
-                sectionStudents[section] = parsed[section];
+        if (savedSectionData) {
+            const parsed = JSON.parse(savedSectionData);
+            Object.keys(parsed).forEach(section => {
+                sectionData[section] = parsed[section];
+            });
+        }
+
+        // Support old format for backward compatibility
+        const savedStudents = localStorage.getItem('wishNetworkStudents');
+        const savedData = localStorage.getItem('wishNetworkData');
+        if (savedStudents && !savedSectionStudents) {
+            // Convert old format to new (assume Section A)
+            sectionStudents['A'] = JSON.parse(savedStudents);
+            const studentNamesInput = document.getElementById('studentNames');
+            if (studentNamesInput) {
+                studentNamesInput.value = sectionStudents['A'].join('\n');
             }
-        });
-    }
-
-    if (savedSectionData) {
-        const parsed = JSON.parse(savedSectionData);
-        Object.keys(parsed).forEach(section => {
-            sectionData[section] = parsed[section];
-        });
-    }
-
-    // Support old format for backward compatibility
-    const savedStudents = localStorage.getItem('wishNetworkStudents');
-    const savedData = localStorage.getItem('wishNetworkData');
-    if (savedStudents && !savedSectionStudents) {
-        // Convert old format to new (assume Section A)
-        sectionStudents['A'] = JSON.parse(savedStudents);
-        const studentNamesInput = document.getElementById('studentNames');
-        if (studentNamesInput) {
-            studentNamesInput.value = sectionStudents['A'].join('\n');
         }
-    }
-    if (savedData && !savedSectionData) {
-        // Convert old format to new (assume Section A)
-        sectionData['A'] = JSON.parse(savedData);
+        if (savedData && !savedSectionData) {
+            // Convert old format to new (assume Section A)
+            sectionData['A'] = JSON.parse(savedData);
+        }
     }
 }
 

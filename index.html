@@ -517,7 +517,7 @@
             <div style="margin-top: 30px; padding: 20px; background: #f0f4ff; border-radius: 8px; border-left: 5px solid #667eea;">
                 <h3 style="margin-bottom: 15px; color: #667eea;">📋 Wish Grant Report</h3>
                 <p style="margin-bottom: 15px; color: #666;">Download a report showing who made each wish and who offered to grant it. Use this to connect students after class.</p>
-                <button class="btn" onclick="downloadWishGrantReport()">Download Wish Grant Report</button>
+                <button class="btn" onclick="downloadWishGrantReport()" style="font-size: 1.1em; padding: 12px 24px;">Download Wish Grant Report</button>
             </div>
 
             <div id="setupMessage" style="margin-top: 15px;"></div>
@@ -667,6 +667,37 @@
         </div>
     </div>
 
+    <!-- Firebase Configuration (optional - will fallback to localStorage if not configured) -->
+    <script src="firebase-config.js"></script>
+    <!-- Firebase SDK - Initialize Firebase if config is provided -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        
+        // Wait for firebase-config.js to load
+        window.firebaseApp = null;
+        window.firestore = null;
+        window.firebaseEnabled = false;
+        
+        // Initialize Firebase after a short delay to ensure firebase-config.js is loaded
+        setTimeout(() => {
+            try {
+                const firebaseConfig = window.firebaseConfig;
+                if (firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== 'YOUR_API_KEY') {
+                    window.firebaseApp = initializeApp(firebaseConfig);
+                    window.firestore = getFirestore(window.firebaseApp);
+                    window.firebaseEnabled = true;
+                    console.log('Firebase initialized successfully');
+                } else {
+                    window.firebaseEnabled = false;
+                    console.log('Firebase not configured - using localStorage fallback');
+                }
+            } catch (error) {
+                window.firebaseEnabled = false;
+                console.log('Firebase initialization failed - using localStorage fallback:', error);
+            }
+        }, 100);
+    </script>
     <script src="app.js"></script>
 </body>
 </html>
