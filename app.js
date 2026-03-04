@@ -78,6 +78,36 @@ async function loadFromFirebase() {
                     // Only update UI if user doesn't have in-progress data
                     if (!hasInProgressWishData()) {
                         updateUI();
+                    } else {
+                        // User has in-progress data - only update student dropdowns, don't rebuild forms
+                        const activeTab = document.querySelector('.tab-content.active');
+                        if (activeTab && activeTab.id === 'wish') {
+                            // Just update the student dropdown if needed, don't rebuild checkboxes
+                            const studentSelect = document.getElementById('studentNameWish');
+                            if (studentSelect) {
+                                const currentValue = studentSelect.value;
+                                const currentOptions = Array.from(studentSelect.options).map(opt => opt.value);
+                                const newStudents = Object.keys(sectionStudents).reduce((acc, sec) => {
+                                    return acc.concat(sectionStudents[sec] || []);
+                                }, []);
+                                const section = getCurrentSection('wish');
+                                const sectionStudentsList = section && sectionStudents[section] ? sectionStudents[section] : [];
+                                const studentsChanged = JSON.stringify(currentOptions.sort()) !== JSON.stringify(['', ...sectionStudentsList].sort());
+                                
+                                if (studentsChanged) {
+                                    studentSelect.innerHTML = '<option value="">Select your name...</option>';
+                                    sectionStudentsList.forEach(name => {
+                                        const option = document.createElement('option');
+                                        option.value = name;
+                                        option.textContent = name;
+                                        studentSelect.appendChild(option);
+                                    });
+                                    if (currentValue && sectionStudentsList.includes(currentValue)) {
+                                        studentSelect.value = currentValue;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -87,20 +117,31 @@ async function loadFromFirebase() {
             if (snapshot.exists()) {
                 const data = snapshot.data();
                 if (data.data) {
+                    // Update data in memory first
                     Object.assign(sectionData, data.data);
-                    // Update tabs if they're visible, but preserve in-progress data
+                    
+                    // Check if user has in-progress data BEFORE deciding to update UI
+                    const hasInProgress = hasInProgressWishData();
+                    
                     const activeTab = document.querySelector('.tab-content.active');
                     if (activeTab) {
                         if (activeTab.id === 'wish') {
-                            // Always update wish tab, but it will preserve in-progress data
-                            updateWishTab();
+                            // DON'T update wish tab if user has in-progress data
+                            // Data is already updated in memory, so new wishes will appear
+                            // when they refresh or submit, but form won't be cleared
+                            if (!hasInProgress) {
+                                updateWishTab();
+                            }
+                            // If has in-progress, do nothing - form stays as is
                         } else if (activeTab.id === 'grant') {
-                            // Always update grant tab, but it will preserve selections
+                            // Grant tab can always update - it preserves selections
                             updateGrantTab();
                         }
                     } else {
-                        // No active tab, safe to update UI
-                        updateUI();
+                        // No active tab, safe to update UI only if no in-progress data
+                        if (!hasInProgress) {
+                            updateUI();
+                        }
                     }
                 }
             }
@@ -621,14 +662,17 @@ function hasInProgressWishData() {
     // Check if user has selected a student
     const hasStudent = studentSelect && studentSelect.value && studentSelect.value.trim() !== '';
     
-    // Check if user has entered a wish
+    // Check if user has entered a wish (even partially)
     const hasWish = wishInput && wishInput.value && wishInput.value.trim() !== '';
     
     // Check if user has selected any close ties
     const hasCloseTies = closeTiesDiv && document.querySelectorAll('#closeTies input[type="checkbox"]:checked').length > 0;
     
-    // Return true if user has any in-progress data
-    return hasStudent && (hasWish || hasCloseTies);
+    // Return true if user has selected a student AND has either entered a wish OR selected close ties
+    // This means they've started filling out the form
+    const result = hasStudent && (hasWish || hasCloseTies);
+    
+    return result;
 }
 
 // Update UI elements
@@ -663,6 +707,13 @@ function updateCloseTiesCount() {
 
 // Update wish tab (Phase 1)
 function updateWishTab() {
+    // Early exit if user has in-progress data - don't touch the form at all
+    if (hasInProgressWishData()) {
+        // User has in-progress data - don't update form, just update data in memory
+        // This prevents clearing their work when Firebase updates
+        return;
+    }
+    
     const section = getCurrentSection('wish');
     const studentSelect = document.getElementById('studentNameWish');
     const closeTiesDiv = document.getElementById('closeTies');
