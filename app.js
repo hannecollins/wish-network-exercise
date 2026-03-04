@@ -75,7 +75,10 @@ async function loadFromFirebase() {
                 const data = snapshot.data();
                 if (data.data) {
                     Object.assign(sectionStudents, data.data);
-                    updateUI();
+                    // Only update UI if user doesn't have in-progress data
+                    if (!hasInProgressWishData()) {
+                        updateUI();
+                    }
                 }
             }
         });
@@ -85,15 +88,19 @@ async function loadFromFirebase() {
                 const data = snapshot.data();
                 if (data.data) {
                     Object.assign(sectionData, data.data);
-                    updateUI();
-                    // Update tabs if they're visible
+                    // Update tabs if they're visible, but preserve in-progress data
                     const activeTab = document.querySelector('.tab-content.active');
                     if (activeTab) {
                         if (activeTab.id === 'wish') {
+                            // Always update wish tab, but it will preserve in-progress data
                             updateWishTab();
                         } else if (activeTab.id === 'grant') {
+                            // Always update grant tab, but it will preserve selections
                             updateGrantTab();
                         }
+                    } else {
+                        // No active tab, safe to update UI
+                        updateUI();
                     }
                 }
             }
@@ -605,6 +612,25 @@ function downloadWishGrantReport() {
     }, 500);
 }
 
+// Check if user has in-progress wish data (not yet submitted)
+function hasInProgressWishData() {
+    const studentSelect = document.getElementById('studentNameWish');
+    const wishInput = document.getElementById('wishInput');
+    const closeTiesDiv = document.getElementById('closeTies');
+    
+    // Check if user has selected a student
+    const hasStudent = studentSelect && studentSelect.value && studentSelect.value.trim() !== '';
+    
+    // Check if user has entered a wish
+    const hasWish = wishInput && wishInput.value && wishInput.value.trim() !== '';
+    
+    // Check if user has selected any close ties
+    const hasCloseTies = closeTiesDiv && document.querySelectorAll('#closeTies input[type="checkbox"]:checked').length > 0;
+    
+    // Return true if user has any in-progress data
+    return hasStudent && (hasWish || hasCloseTies);
+}
+
 // Update UI elements
 function updateUI() {
     updateWishTab();
@@ -640,22 +666,48 @@ function updateWishTab() {
     const section = getCurrentSection('wish');
     const studentSelect = document.getElementById('studentNameWish');
     const closeTiesDiv = document.getElementById('closeTies');
+    const wishInput = document.getElementById('wishInput');
 
+    // Preserve current form state before updating - do this FIRST
+    const currentStudent = studentSelect ? studentSelect.value : '';
+    const currentWish = wishInput ? wishInput.value : '';
+    const currentCheckedBoxes = new Set();
+    if (closeTiesDiv) {
+        document.querySelectorAll('#closeTies input[type="checkbox"]:checked').forEach(cb => {
+            currentCheckedBoxes.add(cb.value);
+        });
+    }
+    
+    // If user has in-progress data, only update student dropdown if needed, don't rebuild checkboxes
+    const hasInProgress = currentStudent && (currentWish || currentCheckedBoxes.size > 0);
+    
     // Update student dropdown based on selected section
     if (studentSelect) {
-        studentSelect.innerHTML = '<option value="">Select your name...</option>';
-        if (section && sectionStudents[section]) {
-            sectionStudents[section].forEach(name => {
-                const option = document.createElement('option');
-                option.value = name;
-                option.textContent = name;
-                studentSelect.appendChild(option);
-            });
+        const wasEmpty = studentSelect.value === '';
+        const currentOptions = Array.from(studentSelect.options).map(opt => opt.value);
+        const newStudents = section && sectionStudents[section] ? sectionStudents[section] : [];
+        const studentsChanged = JSON.stringify(currentOptions.sort()) !== JSON.stringify(['', ...newStudents].sort());
+        
+        // Only rebuild dropdown if students list changed
+        if (studentsChanged) {
+            studentSelect.innerHTML = '<option value="">Select your name...</option>';
+            if (section && sectionStudents[section]) {
+                sectionStudents[section].forEach(name => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    studentSelect.appendChild(option);
+                });
+            }
+            // Restore selected student if it still exists
+            if (currentStudent && !wasEmpty && newStudents.includes(currentStudent)) {
+                studentSelect.value = currentStudent;
+            }
         }
     }
 
-    // Update close ties checkboxes based on selected section
-    if (closeTiesDiv) {
+    // Only rebuild checkboxes if user doesn't have in-progress data OR if student list changed
+    if (closeTiesDiv && !hasInProgress) {
         closeTiesDiv.innerHTML = '';
         if (section && sectionStudents[section]) {
             sectionStudents[section].forEach(name => {
@@ -665,6 +717,11 @@ function updateWishTab() {
                 checkbox.type = 'checkbox';
                 checkbox.id = `close-${section}-${name}`;
                 checkbox.value = name;
+                
+                // Restore checked state if it was checked before
+                if (currentCheckedBoxes.has(name)) {
+                    checkbox.checked = true;
+                }
                 
                 // Add change event listener to enforce 20 person limit
                 checkbox.addEventListener('change', function() {
@@ -685,20 +742,47 @@ function updateWishTab() {
                 closeTiesDiv.appendChild(div);
             });
         }
+    } else if (closeTiesDiv && hasInProgress) {
+        // User has in-progress data - just ensure all students are in the list
+        // Check if any new students need to be added
+        const existingCheckboxes = Array.from(closeTiesDiv.querySelectorAll('input[type="checkbox"]')).map(cb => cb.value);
+        const allStudents = section && sectionStudents[section] ? sectionStudents[section] : [];
+        const missingStudents = allStudents.filter(name => !existingCheckboxes.includes(name));
+        
+        // Add any missing students (new students added to the list)
+        missingStudents.forEach(name => {
+            const div = document.createElement('div');
+            div.className = 'checkbox-item';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `close-${section}-${name}`;
+            checkbox.value = name;
+            
+            checkbox.addEventListener('change', function() {
+                const checkedCount = document.querySelectorAll('#closeTies input[type="checkbox"]:checked').length;
+                if (checkedCount > 20 && this.checked) {
+                    this.checked = false;
+                    showMessage('wishMessage', 'You can only select up to 20 people. Please uncheck someone else first.', 'error');
+                }
+                updateCloseTiesCount();
+            });
+            
+            const label = document.createElement('label');
+            label.htmlFor = `close-${section}-${name}`;
+            label.textContent = name;
+            div.appendChild(checkbox);
+            div.appendChild(label);
+            closeTiesDiv.appendChild(div);
+        });
+    }
+    
+    // Always restore wish text (it won't be cleared if we didn't rebuild)
+    if (wishInput && currentWish) {
+        wishInput.value = currentWish;
     }
     
     // Update the count display
     updateCloseTiesCount();
-
-    // Don't auto-load data - students should only see their own data when they submit
-    // Clear form when name is selected
-    if (studentSelect) {
-        const wishInput = document.getElementById('wishInput');
-        if (wishInput) wishInput.value = '';
-        document.querySelectorAll('#closeTies input[type="checkbox"]').forEach(cb => cb.checked = false);
-        updateCloseTiesCount();
-        updateCloseTiesCount();
-    }
 }
 
 // Track selected wishes for granting
@@ -730,7 +814,14 @@ function updateGrantTab() {
 
     // Only show wishes if a student is selected and section is selected
     if (currentStudent && section) {
-        selectedWishIds = []; // Reset selection when student changes
+        // Preserve selected wishes - only reset if student actually changed
+        const previousStudent = studentSelect ? studentSelect.getAttribute('data-previous-student') : null;
+        if (previousStudent && previousStudent !== currentStudent) {
+            selectedWishIds = []; // Reset selection only when student changes
+        }
+        if (studentSelect) {
+            studentSelect.setAttribute('data-previous-student', currentStudent);
+        }
         displayAllWishes(currentStudent, section);
         if (allWishesDisplay) {
             allWishesDisplay.style.display = 'block';
@@ -763,10 +854,26 @@ function displayAllWishes(currentStudent, section) {
         return;
     }
 
+    // Preserve selected wishes by mapping old IDs to new ones based on student name
+    // Since wish IDs include index which might change, we'll use student name as the key
+    const preservedSelections = new Set();
+    selectedWishIds.forEach(oldId => {
+        // Extract student name from old ID format: wish-{section}-{index}-{name}
+        const match = oldId.match(/wish-[^-]+-[^-]+-(.+)$/);
+        if (match) {
+            preservedSelections.add(match[1]); // Store by student name
+        }
+    });
+
     let html = '';
     studentsWithWishes.forEach((name, index) => {
         const data = sectionStudentData[name];
         const wishId = `wish-${section}-${index}-${name}`; // Use section, index and name as unique ID
+        // Restore selection if this student's wish was previously selected
+        const wasSelected = preservedSelections.has(name);
+        if (wasSelected && !selectedWishIds.includes(wishId)) {
+            selectedWishIds.push(wishId);
+        }
         const isSelected = selectedWishIds.includes(wishId);
         html += `<div class="wish-card ${isSelected ? 'selected' : ''}" data-wish-id="${wishId}" data-student-name="${name}" onclick="toggleWishSelection('${wishId}')">`;
         html += `<div class="wish-text">"${data.wish}"</div>`;
