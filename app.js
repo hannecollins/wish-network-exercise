@@ -62,6 +62,7 @@ function parseSectionDefinitionsText(text) {
     return out;
 }
 
+/** Add section ids from rosters/survey that are missing from definitions (first-run / discovery only). */
 function mergeDefinitionKeysFromStoredData() {
     const keys = new Set([
         ...Object.keys(sectionStudents || {}),
@@ -76,6 +77,28 @@ function mergeDefinitionKeysFromStoredData() {
     sectionDefinitions = Array.from(byId.values()).sort((a, b) =>
         a.id.localeCompare(b.id, undefined, { numeric: true })
     );
+}
+
+function sectionHasSurveyContent(sectionId) {
+    const data = sectionData[sectionId] || {};
+    return Object.keys(data).some(name => {
+        const d = data[name];
+        if (!d) return false;
+        if (d.wish && String(d.wish).trim()) return true;
+        if (Array.isArray(d.closeTies) && d.closeTies.length) return true;
+        if (Array.isArray(d.wishGrants) && d.wishGrants.length) return true;
+        return false;
+    });
+}
+
+function pruneSectionStorageToAllowedIds(allowedIds) {
+    const allowed = new Set(allowedIds);
+    Object.keys(sectionStudents).forEach(id => {
+        if (!allowed.has(id)) delete sectionStudents[id];
+    });
+    Object.keys(sectionData).forEach(id => {
+        if (!allowed.has(id)) delete sectionData[id];
+    });
 }
 
 function ensureAllSectionBuckets() {
@@ -127,6 +150,29 @@ function saveSectionDefinitionsFromSetup() {
             showMessage('setupMessage', 'Enter at least one section line (for example: 1|Section 1).', 'error');
             return;
         }
+        const nextIdSet = new Set(parsed.map(p => p.id));
+        const previousIds = getSectionIds();
+        const removed = previousIds.filter(id => !nextIdSet.has(id));
+        if (removed.length > 0) {
+            const wouldLoseData = removed.some(id => {
+                const roster = sectionStudents[id] || [];
+                return roster.length > 0 || sectionHasSurveyContent(id);
+            });
+            if (wouldLoseData) {
+                const detail = removed.map(id => {
+                    const n = (sectionStudents[id] || []).length;
+                    const surv = sectionHasSurveyContent(id) ? ', has wish / survey data' : '';
+                    return `• ${getSectionLabel(id)} (id ${id}): ${n} student name(s)${surv}`;
+                }).join('\n');
+                const ok = confirm(
+                    'You are removing one or more sections that still have rosters and/or survey data. That data will be deleted from this browser (and Firebase when you save).\n\n' +
+                        detail +
+                        '\n\nClick OK to remove those sections and delete their data, or Cancel to keep your current list.'
+                );
+                if (!ok) return;
+            }
+            pruneSectionStorageToAllowedIds([...nextIdSet]);
+        }
         sectionDefinitions = parsed;
         ensureAllSectionBuckets();
         saveData();
@@ -139,7 +185,11 @@ function saveSectionDefinitionsFromSetup() {
     }
 }
 
-function normalizeSectionDefinitionsAfterLoad() {
+/**
+ * @param {boolean} mergeOrphanKeysFromData If true, append ids found in sectionStudents/sectionData
+ *   that are missing from definitions (first install / no saved list). If false, saved definitions stay as-is.
+ */
+function normalizeSectionDefinitionsAfterLoad(mergeOrphanKeysFromData) {
     if (!Array.isArray(sectionDefinitions) || sectionDefinitions.length === 0) {
         sectionDefinitions = DEFAULT_SECTION_DEFINITIONS.map(d => ({ ...d }));
     } else {
@@ -154,7 +204,9 @@ function normalizeSectionDefinitionsAfterLoad() {
             sectionDefinitions = DEFAULT_SECTION_DEFINITIONS.map(d => ({ ...d }));
         }
     }
-    mergeDefinitionKeysFromStoredData();
+    if (mergeOrphanKeysFromData) {
+        mergeDefinitionKeysFromStoredData();
+    }
 }
 
 function getLegacyImportTargetSectionId() {
@@ -331,7 +383,6 @@ async function loadFromFirebase() {
                         id: String(d.id).trim(),
                         label: String(d.label != null ? d.label : '').trim() || `Section ${String(d.id).trim()}`
                     }));
-                    mergeDefinitionKeysFromStoredData();
                     ensureAllSectionBuckets();
                     refreshSectionSelects();
                     syncSectionDefinitionsTextarea();
@@ -2470,20 +2521,23 @@ function importData() {
                 if (data.sectionData) {
                     sectionData = data.sectionData;
                 }
-                if (Array.isArray(data.sectionDefinitions) && data.sectionDefinitions.length) {
+                const hadImportedDefinitions = Array.isArray(data.sectionDefinitions) && data.sectionDefinitions.length > 0;
+                if (hadImportedDefinitions) {
                     sectionDefinitions = data.sectionDefinitions.map(d => ({
                         id: String(d.id).trim(),
                         label: String(d.label != null ? d.label : '').trim() || `Section ${String(d.id).trim()}`
                     }));
                 }
-                normalizeSectionDefinitionsAfterLoad();
+                normalizeSectionDefinitionsAfterLoad(!hadImportedDefinitions);
                 if (legacyStudents) {
                     sectionStudents[getLegacyImportTargetSectionId()] = legacyStudents;
                 }
                 if (legacyStudentData) {
                     sectionData[getLegacyImportTargetSectionId()] = legacyStudentData;
                 }
-                mergeDefinitionKeysFromStoredData();
+                if (!hadImportedDefinitions) {
+                    mergeDefinitionKeysFromStoredData();
+                }
                 ensureAllSectionBuckets();
                 refreshSectionSelects();
                 syncSectionDefinitionsTextarea();
@@ -2689,7 +2743,8 @@ async function loadData() {
         }
     }
 
-    normalizeSectionDefinitionsAfterLoad();
+    const hadPersistedSectionDefinitions = sectionDefinitions.length > 0;
+    normalizeSectionDefinitionsAfterLoad(!hadPersistedSectionDefinitions);
 
     if (flatLegacyStudents) {
         const target = getLegacyImportTargetSectionId();
@@ -2703,7 +2758,9 @@ async function loadData() {
         sectionData[getLegacyImportTargetSectionId()] = flatLegacyData;
     }
 
-    mergeDefinitionKeysFromStoredData();
+    if (!hadPersistedSectionDefinitions) {
+        mergeDefinitionKeysFromStoredData();
+    }
     ensureAllSectionBuckets();
     refreshSectionSelects();
     syncSectionDefinitionsTextarea();
