@@ -5,6 +5,165 @@ let currentSection = ''; // Currently selected section
 let pendingTab = null; // Tab waiting for password authentication
 const INSTRUCTOR_PASSWORD = 'password';
 
+/** Display order and labels for sections (ids are stored in JSON/Firebase keys). */
+let sectionDefinitions = [];
+
+const DEFAULT_SECTION_DEFINITIONS = [
+    { id: '1', label: 'Section 1' },
+    { id: '3', label: 'Section 3' },
+    { id: '4', label: 'Section 4' },
+    { id: '5', label: 'Section 5' }
+];
+
+function getOrderedSectionDefinitions() {
+    return [...sectionDefinitions].sort((a, b) =>
+        a.id.localeCompare(b.id, undefined, { numeric: true })
+    );
+}
+
+function getSectionIds() {
+    return getOrderedSectionDefinitions().map(d => d.id);
+}
+
+function getSectionLabel(id) {
+    const d = sectionDefinitions.find(x => x.id === id);
+    return d ? d.label : `Section ${id}`;
+}
+
+function sectionDefinitionsToText() {
+    return getOrderedSectionDefinitions()
+        .map(({ id, label }) => (label === `Section ${id}` ? id : `${id}|${label}`))
+        .join('\n');
+}
+
+function parseSectionDefinitionsText(text) {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const seen = new Set();
+    const out = [];
+    for (const line of lines) {
+        let id;
+        let label;
+        if (line.includes('|')) {
+            const idx = line.indexOf('|');
+            id = line.slice(0, idx).trim();
+            label = line.slice(idx + 1).trim();
+        } else {
+            id = line;
+            label = `Section ${id}`;
+        }
+        if (!id) continue;
+        if (seen.has(id)) {
+            throw new Error(`Duplicate section id "${id}". Each line must use a unique id.`);
+        }
+        seen.add(id);
+        if (!label) label = `Section ${id}`;
+        out.push({ id, label });
+    }
+    return out;
+}
+
+function mergeDefinitionKeysFromStoredData() {
+    const keys = new Set([
+        ...Object.keys(sectionStudents || {}),
+        ...Object.keys(sectionData || {})
+    ]);
+    const byId = new Map(sectionDefinitions.map(d => [d.id, { ...d }]));
+    keys.forEach(id => {
+        if (!byId.has(id)) {
+            byId.set(id, { id, label: `Section ${id}` });
+        }
+    });
+    sectionDefinitions = Array.from(byId.values()).sort((a, b) =>
+        a.id.localeCompare(b.id, undefined, { numeric: true })
+    );
+}
+
+function ensureAllSectionBuckets() {
+    const ids = new Set([
+        ...getSectionIds(),
+        ...Object.keys(sectionStudents || {}),
+        ...Object.keys(sectionData || {})
+    ]);
+    ids.forEach(section => {
+        if (!sectionStudents[section]) sectionStudents[section] = [];
+        if (!sectionData[section]) sectionData[section] = {};
+    });
+}
+
+function refreshSectionSelects() {
+    const selectIds = ['sectionSetup', 'sectionWish', 'sectionGrant', 'sectionNetwork'];
+    const ordered = getOrderedSectionDefinitions();
+    selectIds.forEach(selectId => {
+        const sel = document.getElementById(selectId);
+        if (!sel) return;
+        const prev = sel.value;
+        const placeholder = selectId === 'sectionSetup' || selectId === 'sectionNetwork'
+            ? 'Select a section...'
+            : 'Select your section...';
+        sel.innerHTML = `<option value="">${placeholder}</option>`;
+        ordered.forEach(({ id, label }) => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = label;
+            sel.appendChild(opt);
+        });
+        if (prev && ordered.some(d => d.id === prev)) {
+            sel.value = prev;
+        }
+    });
+}
+
+function syncSectionDefinitionsTextarea() {
+    const ta = document.getElementById('sectionDefinitionsInput');
+    if (ta) ta.value = sectionDefinitionsToText();
+}
+
+function saveSectionDefinitionsFromSetup() {
+    try {
+        const ta = document.getElementById('sectionDefinitionsInput');
+        if (!ta) return;
+        const parsed = parseSectionDefinitionsText(ta.value);
+        if (parsed.length === 0) {
+            showMessage('setupMessage', 'Enter at least one section line (for example: 1|Section 1).', 'error');
+            return;
+        }
+        sectionDefinitions = parsed;
+        ensureAllSectionBuckets();
+        saveData();
+        refreshSectionSelects();
+        syncSectionDefinitionsTextarea();
+        updateUI();
+        showMessage('setupMessage', 'Section list saved. Dropdowns now use these ids and labels.', 'success');
+    } catch (e) {
+        showMessage('setupMessage', (e && e.message) ? e.message : String(e), 'error');
+    }
+}
+
+function normalizeSectionDefinitionsAfterLoad() {
+    if (!Array.isArray(sectionDefinitions) || sectionDefinitions.length === 0) {
+        sectionDefinitions = DEFAULT_SECTION_DEFINITIONS.map(d => ({ ...d }));
+    } else {
+        sectionDefinitions = sectionDefinitions
+            .filter(d => d && typeof d.id === 'string' && d.id.trim())
+            .map(d => {
+                const id = d.id.trim();
+                const rawLabel = d.label != null ? String(d.label).trim() : '';
+                return { id, label: rawLabel || `Section ${id}` };
+            });
+        if (sectionDefinitions.length === 0) {
+            sectionDefinitions = DEFAULT_SECTION_DEFINITIONS.map(d => ({ ...d }));
+        }
+    }
+    mergeDefinitionKeysFromStoredData();
+}
+
+function getLegacyImportTargetSectionId() {
+    const ids = getSectionIds();
+    if (ids.includes('A')) return 'A';
+    if (ids.includes('1')) return '1';
+    return ids[0] || '1';
+}
+
 // Firebase helpers
 async function saveToFirebase() {
     if (!window.firebaseEnabled || !window.firestore) {
@@ -17,7 +176,7 @@ async function saveToFirebase() {
         const firestoreModule = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
         const { doc, setDoc } = firestoreModule;
         
-        console.log('Saving to Firebase...', { sectionStudents, sectionData });
+        console.log('Saving to Firebase...', { sectionStudents, sectionData, sectionDefinitions });
         
         // Save student names
         await setDoc(doc(window.firestore, 'data', 'sectionStudents'), {
@@ -32,6 +191,12 @@ async function saveToFirebase() {
             updatedAt: new Date().toISOString()
         });
         console.log('Saved sectionData to Firebase');
+
+        await setDoc(doc(window.firestore, 'data', 'sectionDefinitions'), {
+            data: sectionDefinitions,
+            updatedAt: new Date().toISOString()
+        });
+        console.log('Saved sectionDefinitions to Firebase');
         
         return true;
     } catch (error) {
@@ -54,6 +219,7 @@ async function loadFromFirebase() {
         // Load initial data
         const studentsDoc = await getDoc(doc(window.firestore, 'data', 'sectionStudents'));
         const dataDoc = await getDoc(doc(window.firestore, 'data', 'sectionData'));
+        const definitionsDoc = await getDoc(doc(window.firestore, 'data', 'sectionDefinitions'));
         
         if (studentsDoc.exists()) {
             const data = studentsDoc.data();
@@ -66,6 +232,16 @@ async function loadFromFirebase() {
             const data = dataDoc.data();
             if (data.data) {
                 Object.assign(sectionData, data.data);
+            }
+        }
+
+        if (definitionsDoc.exists()) {
+            const raw = definitionsDoc.data();
+            if (Array.isArray(raw.data) && raw.data.length) {
+                sectionDefinitions = raw.data.map(d => ({
+                    id: String(d.id).trim(),
+                    label: String(d.label != null ? d.label : '').trim() || `Section ${String(d.id).trim()}`
+                }));
             }
         }
         
@@ -146,6 +322,25 @@ async function loadFromFirebase() {
                 }
             }
         });
+
+        onSnapshot(doc(window.firestore, 'data', 'sectionDefinitions'), (snapshot) => {
+            if (snapshot.exists()) {
+                const raw = snapshot.data();
+                if (Array.isArray(raw.data) && raw.data.length) {
+                    sectionDefinitions = raw.data.map(d => ({
+                        id: String(d.id).trim(),
+                        label: String(d.label != null ? d.label : '').trim() || `Section ${String(d.id).trim()}`
+                    }));
+                    mergeDefinitionKeysFromStoredData();
+                    ensureAllSectionBuckets();
+                    refreshSectionSelects();
+                    syncSectionDefinitionsTextarea();
+                    if (!hasInProgressWishData()) {
+                        updateUI();
+                    }
+                }
+            }
+        });
         
         return true;
     } catch (error) {
@@ -208,15 +403,6 @@ window.testFirebase = async function() {
 // Initialize
 document.addEventListener('DOMContentLoaded', async function() {
     await loadData();
-    // Initialize sections if they don't exist
-    ['A', 'B', 'C', 'D'].forEach(section => {
-        if (!sectionStudents[section]) {
-            sectionStudents[section] = [];
-        }
-        if (!sectionData[section]) {
-            sectionData[section] = {};
-        }
-    });
     
     // Check for hash URL and switch to appropriate tab
     const hash = window.location.hash.substring(1); // Remove the #
@@ -283,12 +469,12 @@ function onSectionChange(tab) {
             if (sectionStudents[section] && sectionStudents[section].length > 0) {
                 studentNamesInput.value = sectionStudents[section].join('\n');
                 if (sectionInfo) {
-                    sectionInfo.textContent = `Currently viewing Section ${section} (${sectionStudents[section].length} students saved)`;
+                    sectionInfo.textContent = `Currently viewing ${getSectionLabel(section)} (${sectionStudents[section].length} students saved)`;
                 }
             } else {
                 studentNamesInput.value = '';
                 if (sectionInfo) {
-                    sectionInfo.textContent = `Currently editing Section ${section} (no students saved yet)`;
+                    sectionInfo.textContent = `Currently editing ${getSectionLabel(section)} (no students saved yet)`;
                 }
             }
         }
@@ -444,6 +630,7 @@ function switchToTab(tabName) {
     } else if (tabName === 'grant') {
         updateGrantTab();
     } else if (tabName === 'setup') {
+        syncSectionDefinitionsTextarea();
         // Load student names for selected section when switching to setup tab
         const section = getCurrentSection('setup');
         const studentNamesInput = document.getElementById('studentNames');
@@ -453,13 +640,13 @@ function switchToTab(tabName) {
             if (section && sectionStudents[section] && sectionStudents[section].length > 0) {
                 studentNamesInput.value = sectionStudents[section].join('\n');
                 if (sectionInfo) {
-                    sectionInfo.textContent = `Currently viewing Section ${section} (${sectionStudents[section].length} students saved)`;
+                    sectionInfo.textContent = `Currently viewing ${getSectionLabel(section)} (${sectionStudents[section].length} students saved)`;
                 }
             } else {
                 studentNamesInput.value = '';
                 if (sectionInfo) {
                     if (section) {
-                        sectionInfo.textContent = `Currently editing Section ${section} (no students saved yet)`;
+                        sectionInfo.textContent = `Currently editing ${getSectionLabel(section)} (no students saved yet)`;
                     } else {
                         sectionInfo.textContent = 'Please select a section to view or edit student names';
                     }
@@ -506,10 +693,10 @@ function saveStudentNames() {
     // Update section info display
     const sectionInfo = document.getElementById('sectionInfo');
     if (sectionInfo) {
-        sectionInfo.textContent = `Section ${section} (${sectionStudents[section].length} students saved)`;
+        sectionInfo.textContent = `${getSectionLabel(section)} (${sectionStudents[section].length} students saved)`;
     }
     
-    showMessage('setupMessage', `Saved ${sectionStudents[section].length} student names for Section ${section}!`, 'success');
+    showMessage('setupMessage', `Saved ${sectionStudents[section].length} student names for ${getSectionLabel(section)}!`, 'success');
 }
 
 // Export student names to a downloadable JSON file (for GitHub)
@@ -543,8 +730,13 @@ function downloadWishGrantReport() {
     reportContent += 'Generated: ' + new Date().toLocaleString() + '\n';
     reportContent += '='.repeat(80) + '\n\n';
     
-    // Process each section
-    ['A', 'B', 'C', 'D'].forEach(section => {
+    // Process each section (include any bucket that has data, not only configured labels)
+    const reportSectionIds = [...new Set([
+        ...getSectionIds(),
+        ...Object.keys(sectionData || {})
+    ])].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+    reportSectionIds.forEach(section => {
         const sectionDataForSection = sectionData[section] || {};
         
         // Find all students who made wishes
@@ -557,7 +749,7 @@ function downloadWishGrantReport() {
             return; // Skip empty sections
         }
         
-        reportContent += `SECTION ${section}\n`;
+        reportContent += `${getSectionLabel(section)} (id: ${section})\n`;
         reportContent += '='.repeat(80) + '\n\n';
         
         // For each student who made a wish, find who granted it
@@ -590,9 +782,9 @@ function downloadWishGrantReport() {
     });
     
     // Also create CSV version
-    let csvContent = 'Section,Student Name,Wish,Number of Granters,Granters\n';
+    let csvContent = 'Section id,Section label,Student Name,Wish,Number of Granters,Granters\n';
     
-    ['A', 'B', 'C', 'D'].forEach(section => {
+    reportSectionIds.forEach(section => {
         const sectionDataForSection = sectionData[section] || {};
         const studentsWithWishes = Object.keys(sectionDataForSection).filter(name => {
             const data = sectionDataForSection[name];
@@ -619,7 +811,7 @@ function downloadWishGrantReport() {
                 return str;
             };
             
-            csvContent += `${section},${escapeCSV(wishMaker)},${escapeCSV(wish)},${granters.length},"${granters.join('; ')}"\n`;
+            csvContent += `${escapeCSV(section)},${escapeCSV(getSectionLabel(section))},${escapeCSV(wishMaker)},${escapeCSV(wish)},${granters.length},"${granters.join('; ')}"\n`;
         });
     });
     
@@ -1193,7 +1385,7 @@ function generateNetworks() {
 
     const sectionStudentData = sectionData[section] || {};
     if (Object.keys(sectionStudentData).length === 0) {
-        alert(`No student data available for Section ${section}. Please collect data from students first.`);
+        alert(`No student data available for ${getSectionLabel(section)}. Please collect data from students first.`);
         return;
     }
 
@@ -2244,6 +2436,7 @@ function exportData() {
     const data = {
         sectionStudents: sectionStudents,
         sectionData: sectionData,
+        sectionDefinitions: sectionDefinitions,
         exportDate: new Date().toISOString()
     };
     const json = JSON.stringify(data, null, 2);
@@ -2269,28 +2462,31 @@ function importData() {
         reader.onload = function(e) {
             try {
                 const data = JSON.parse(e.target.result);
-                // Support both old and new format
+                const legacyStudents = !data.sectionStudents && data.students ? data.students : null;
+                const legacyStudentData = !data.sectionData && data.studentData ? data.studentData : null;
                 if (data.sectionStudents) {
                     sectionStudents = data.sectionStudents;
-                } else if (data.students) {
-                    // Old format - convert to new format (assume Section A)
-                    sectionStudents['A'] = data.students;
                 }
                 if (data.sectionData) {
                     sectionData = data.sectionData;
-                } else if (data.studentData) {
-                    // Old format - convert to new format (assume Section A)
-                    sectionData['A'] = data.studentData;
                 }
-                // Initialize missing sections
-                ['A', 'B', 'C', 'D'].forEach(section => {
-                    if (!sectionStudents[section]) {
-                        sectionStudents[section] = [];
-                    }
-                    if (!sectionData[section]) {
-                        sectionData[section] = {};
-                    }
-                });
+                if (Array.isArray(data.sectionDefinitions) && data.sectionDefinitions.length) {
+                    sectionDefinitions = data.sectionDefinitions.map(d => ({
+                        id: String(d.id).trim(),
+                        label: String(d.label != null ? d.label : '').trim() || `Section ${String(d.id).trim()}`
+                    }));
+                }
+                normalizeSectionDefinitionsAfterLoad();
+                if (legacyStudents) {
+                    sectionStudents[getLegacyImportTargetSectionId()] = legacyStudents;
+                }
+                if (legacyStudentData) {
+                    sectionData[getLegacyImportTargetSectionId()] = legacyStudentData;
+                }
+                mergeDefinitionKeysFromStoredData();
+                ensureAllSectionBuckets();
+                refreshSectionSelects();
+                syncSectionDefinitionsTextarea();
                 saveData();
                 updateUI();
                 showMessage('grantMessage', 'Data imported successfully!', 'success');
@@ -2311,7 +2507,7 @@ async function clearSurveyData() {
         return;
     }
 
-    if (confirm(`Are you sure you want to clear all survey data (wishes and wish grants) for Section ${section}? Student names will be kept. This cannot be undone.`)) {
+    if (confirm(`Are you sure you want to clear all survey data (wishes and wish grants) for ${getSectionLabel(section)}? Student names will be kept. This cannot be undone.`)) {
         // Clear all survey data for this section
         sectionData[section] = {};
         
@@ -2339,7 +2535,7 @@ async function clearSurveyData() {
                             data: currentData.data,
                             updatedAt: new Date().toISOString()
                         });
-                        console.log(`Cleared Firebase data for Section ${section}`);
+                        console.log(`Cleared Firebase data for section id ${section}`);
                     }
                 } else {
                     // Document doesn't exist yet, create it with empty section
@@ -2355,15 +2551,20 @@ async function clearSurveyData() {
         }
         
         updateUI();
-        showMessage('setupMessage', `Survey data cleared for Section ${section}. Student names have been preserved.`, 'success');
+        showMessage('setupMessage', `Survey data cleared for ${getSectionLabel(section)}. Student names have been preserved.`, 'success');
     }
 }
 
 // Clear all data
 function clearAllData() {
     if (confirm('Are you sure you want to clear all student data for all sections? This cannot be undone.')) {
+        const ids = new Set([
+            ...getSectionIds(),
+            ...Object.keys(sectionStudents || {}),
+            ...Object.keys(sectionData || {})
+        ]);
         sectionData = {};
-        ['A', 'B', 'C', 'D'].forEach(section => {
+        ids.forEach(section => {
             sectionData[section] = {};
         });
         saveData();
@@ -2386,6 +2587,7 @@ async function saveData() {
     // Always save to localStorage as fallback
     localStorage.setItem('wishNetworkSectionStudents', JSON.stringify(sectionStudents));
     localStorage.setItem('wishNetworkSectionData', JSON.stringify(sectionData));
+    localStorage.setItem('wishNetworkSectionDefinitions', JSON.stringify(sectionDefinitions));
     
     // Also save to Firebase if enabled
     // Wait a bit to ensure Firebase is initialized
@@ -2410,32 +2612,40 @@ async function saveData() {
 
 // Load from Firebase (if enabled), localStorage, and students.json file
 async function loadData() {
-    // Initialize sections
-    ['A', 'B', 'C', 'D'].forEach(section => {
-        if (!sectionStudents[section]) {
-            sectionStudents[section] = [];
+    let flatLegacyStudents = null;
+    let flatLegacyData = null;
+
+    const loadDefinitionsFromLocalStorage = () => {
+        const savedDefs = localStorage.getItem('wishNetworkSectionDefinitions');
+        if (!savedDefs) return;
+        try {
+            const parsed = JSON.parse(savedDefs);
+            if (Array.isArray(parsed) && parsed.length) {
+                sectionDefinitions = parsed.map(d => ({
+                    id: String(d.id).trim(),
+                    label: String(d.label != null ? d.label : '').trim() || `Section ${String(d.id).trim()}`
+                }));
+            }
+        } catch (e) {
+            console.warn('Could not parse wishNetworkSectionDefinitions:', e);
         }
-        if (!sectionData[section]) {
-            sectionData[section] = {};
-        }
-    });
-    
+    };
+
     // Try to load from Firebase first (if enabled)
     const firebaseLoaded = await loadFromFirebase();
-    
-    // If Firebase loaded successfully, it will have set up real-time listeners
-    // and populated sectionStudents and sectionData
-    // We still want to merge with students.json and localStorage as fallback
-    
+
+    // If Firebase has no section definitions yet, fall back to localStorage
+    if (!sectionDefinitions || sectionDefinitions.length === 0) {
+        loadDefinitionsFromLocalStorage();
+    }
+
     // Load student names from students.json file (for GitHub deployment)
     try {
         const response = await fetch('students.json');
         if (response.ok) {
             const fileData = await response.json();
-            // Merge file data with existing data (file data is the base, Firebase/localStorage can override)
             Object.keys(fileData).forEach(section => {
                 if (fileData[section] && fileData[section].length > 0) {
-                    // Only use file data if we don't have data for this section yet
                     if (!sectionStudents[section] || sectionStudents[section].length === 0) {
                         sectionStudents[section] = fileData[section];
                     }
@@ -2451,11 +2661,11 @@ async function loadData() {
         const savedSectionStudents = localStorage.getItem('wishNetworkSectionStudents');
         const savedSectionData = localStorage.getItem('wishNetworkSectionData');
 
-        // Load from localStorage (takes precedence over file for student names)
+        loadDefinitionsFromLocalStorage();
+
         if (savedSectionStudents) {
             const parsed = JSON.parse(savedSectionStudents);
             Object.keys(parsed).forEach(section => {
-                // Only override if localStorage has data (instructor may have updated via app)
                 if (parsed[section] && parsed[section].length > 0) {
                     sectionStudents[section] = parsed[section];
                 }
@@ -2469,22 +2679,34 @@ async function loadData() {
             });
         }
 
-        // Support old format for backward compatibility
         const savedStudents = localStorage.getItem('wishNetworkStudents');
         const savedData = localStorage.getItem('wishNetworkData');
         if (savedStudents && !savedSectionStudents) {
-            // Convert old format to new (assume Section A)
-            sectionStudents['A'] = JSON.parse(savedStudents);
-            const studentNamesInput = document.getElementById('studentNames');
-            if (studentNamesInput) {
-                studentNamesInput.value = sectionStudents['A'].join('\n');
-            }
+            flatLegacyStudents = JSON.parse(savedStudents);
         }
         if (savedData && !savedSectionData) {
-            // Convert old format to new (assume Section A)
-            sectionData['A'] = JSON.parse(savedData);
+            flatLegacyData = JSON.parse(savedData);
         }
     }
+
+    normalizeSectionDefinitionsAfterLoad();
+
+    if (flatLegacyStudents) {
+        const target = getLegacyImportTargetSectionId();
+        sectionStudents[target] = flatLegacyStudents;
+        const studentNamesInput = document.getElementById('studentNames');
+        if (studentNamesInput) {
+            studentNamesInput.value = flatLegacyStudents.join('\n');
+        }
+    }
+    if (flatLegacyData) {
+        sectionData[getLegacyImportTargetSectionId()] = flatLegacyData;
+    }
+
+    mergeDefinitionKeysFromStoredData();
+    ensureAllSectionBuckets();
+    refreshSectionSelects();
+    syncSectionDefinitionsTextarea();
 }
 
 // Event listeners for student name selection

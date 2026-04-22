@@ -472,8 +472,8 @@
             <div class="instructions">
                 <h3>📋 Instructions for Professor</h3>
                 <ol>
-                    <li><strong>Select Section:</strong> Choose the section you're setting up (A, B, C, or D)</li>
-                    <li><strong>Setup:</strong> Enter all student names in your section (one per line)</li>
+                    <li><strong>Sections:</strong> Edit the section list (one per line), then save. Use a short id and optional label, e.g. <code>3|Tuesday</code> or just <code>4</code> for default label &quot;Section 4&quot;.</li>
+                    <li><strong>Student names:</strong> Choose a section, then enter all student names for that section (one per line) and save.</li>
                     <li><strong>Phase 1 - Make a Wish:</strong> Have students fill out:
                         <ul style="margin-left: 20px; margin-top: 5px;">
                             <li>Who they talk to most in the section</li>
@@ -491,13 +491,16 @@
             </div>
 
             <div class="form-group">
+                <label for="sectionDefinitionsInput">Section list (one per line)</label>
+                <textarea id="sectionDefinitionsInput" rows="6" placeholder="1|Section 1&#10;3|Section 3&#10;4|Section 4&#10;5|Section 5"></textarea>
+                <small style="color: #666; margin-top: 5px; display: block;">Each line: <code>id</code> or <code>id|label</code>. Ids are stored in data and in <code>students.json</code> keys. Labels appear in dropdowns for students.</small>
+                <button type="button" class="btn btn-secondary" style="margin-top: 12px;" onclick="saveSectionDefinitionsFromSetup()">Save section list</button>
+            </div>
+
+            <div class="form-group">
                 <label for="sectionSetup">Select Section:</label>
                 <select id="sectionSetup" onchange="onSectionChange('setup')">
                     <option value="">Select a section...</option>
-                    <option value="A">Section A</option>
-                    <option value="B">Section B</option>
-                    <option value="C">Section C</option>
-                    <option value="D">Section D</option>
                 </select>
             </div>
 
@@ -534,10 +537,6 @@
                 <label for="sectionWish">Your Section:</label>
                 <select id="sectionWish" onchange="onSectionChange('wish')">
                     <option value="">Select your section...</option>
-                    <option value="A">Section A</option>
-                    <option value="B">Section B</option>
-                    <option value="C">Section C</option>
-                    <option value="D">Section D</option>
                 </select>
             </div>
 
@@ -577,10 +576,6 @@
                 <label for="sectionGrant">Your Section:</label>
                 <select id="sectionGrant" onchange="onSectionChange('grant')">
                     <option value="">Select your section...</option>
-                    <option value="A">Section A</option>
-                    <option value="B">Section B</option>
-                    <option value="C">Section C</option>
-                    <option value="D">Section D</option>
                 </select>
             </div>
 
@@ -625,10 +620,6 @@
                 <label for="sectionNetwork">Select Section:</label>
                 <select id="sectionNetwork" onchange="onSectionChange('network')">
                     <option value="">Select a section...</option>
-                    <option value="A">Section A</option>
-                    <option value="B">Section B</option>
-                    <option value="C">Section C</option>
-                    <option value="D">Section D</option>
                 </select>
             </div>
 
