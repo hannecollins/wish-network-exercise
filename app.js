@@ -7,6 +7,8 @@ const INSTRUCTOR_PASSWORD = 'password';
 
 /** Display order and labels for sections (ids are stored in JSON/Firebase keys). */
 let sectionDefinitions = [];
+/** Server `updatedAt` from Firestore `sectionDefinitions` doc (ms), for choosing local vs remote. */
+let firebaseSectionDefinitionsLoadedAtMs = 0;
 
 const DEFAULT_SECTION_DEFINITIONS = [
     { id: '1', label: 'Section 1' },
@@ -141,7 +143,7 @@ function syncSectionDefinitionsTextarea() {
     if (ta) ta.value = sectionDefinitionsToText();
 }
 
-function saveSectionDefinitionsFromSetup() {
+async function saveSectionDefinitionsFromSetup() {
     try {
         const ta = document.getElementById('sectionDefinitionsInput');
         if (!ta) return;
@@ -174,8 +176,9 @@ function saveSectionDefinitionsFromSetup() {
             pruneSectionStorageToAllowedIds([...nextIdSet]);
         }
         sectionDefinitions = parsed;
+        firebaseSectionDefinitionsLoadedAtMs = Date.now();
         ensureAllSectionBuckets();
-        saveData();
+        await saveData();
         refreshSectionSelects();
         syncSectionDefinitionsTextarea();
         updateUI();
@@ -214,6 +217,79 @@ function getLegacyImportTargetSectionId() {
     if (ids.includes('A')) return 'A';
     if (ids.includes('1')) return '1';
     return ids[0] || '1';
+}
+
+function firestoreUpdatedAtToMs(val) {
+    if (!val) return 0;
+    if (typeof val.toDate === 'function') {
+        const d = val.toDate();
+        const t = d && d.getTime ? d.getTime() : NaN;
+        return Number.isNaN(t) ? 0 : t;
+    }
+    if (typeof val === 'string') {
+        const m = Date.parse(val);
+        return Number.isNaN(m) ? 0 : m;
+    }
+    return 0;
+}
+
+function sortedSectionDefinitionIds(defs) {
+    if (!defs || !defs.length) return '';
+    return [...defs.map(d => String(d.id).trim())]
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+        .join('\0');
+}
+
+function sectionDefinitionListsSameIds(a, b) {
+    return sortedSectionDefinitionIds(a) === sortedSectionDefinitionIds(b);
+}
+
+function readLocalSectionDefinitionsFromStorage() {
+    const localRaw = localStorage.getItem('wishNetworkSectionDefinitions');
+    if (!localRaw) {
+        return { defs: null, updatedMs: 0 };
+    }
+    try {
+        const parsed = JSON.parse(localRaw);
+        if (!Array.isArray(parsed) || !parsed.length) {
+            return { defs: null, updatedMs: 0 };
+        }
+        const defs = parsed.map(d => ({
+            id: String(d.id).trim(),
+            label: String(d.label != null ? d.label : '').trim() || `Section ${String(d.id).trim()}`
+        }));
+        const ts = localStorage.getItem('wishNetworkSectionDefinitionsUpdatedAt');
+        const updatedMs = ts ? Date.parse(ts) : 0;
+        return { defs, updatedMs: Number.isNaN(updatedMs) ? 0 : updatedMs };
+    } catch (e) {
+        console.warn('Could not parse wishNetworkSectionDefinitions:', e);
+        return { defs: null, updatedMs: 0 };
+    }
+}
+
+/** After Firebase + localStorage loads, pick the newer / more accurate section list (fixes trimmed lists losing to stale Firestore). */
+function resolveSectionDefinitionsPreferNewer() {
+    const { defs: localDefs, updatedMs: localMs } = readLocalSectionDefinitionsFromStorage();
+    const fbMs = firebaseSectionDefinitionsLoadedAtMs || 0;
+
+    if (!localDefs) {
+        return;
+    }
+
+    if (!sectionDefinitions || !sectionDefinitions.length) {
+        sectionDefinitions = localDefs;
+        return;
+    }
+
+    if (localMs > fbMs) {
+        sectionDefinitions = localDefs;
+        return;
+    }
+
+    const hasLocalTimestamp = !!localStorage.getItem('wishNetworkSectionDefinitionsUpdatedAt');
+    if (!hasLocalTimestamp && !sectionDefinitionListsSameIds(sectionDefinitions, localDefs)) {
+        sectionDefinitions = localDefs;
+    }
 }
 
 // Firebase helpers
@@ -264,6 +340,8 @@ async function loadFromFirebase() {
     }
     
     try {
+        firebaseSectionDefinitionsLoadedAtMs = 0;
+
         // Dynamically import Firebase functions
         const firestoreModule = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js');
         const { doc, getDoc, onSnapshot } = firestoreModule;
@@ -289,6 +367,7 @@ async function loadFromFirebase() {
 
         if (definitionsDoc.exists()) {
             const raw = definitionsDoc.data();
+            firebaseSectionDefinitionsLoadedAtMs = firestoreUpdatedAtToMs(raw.updatedAt);
             if (Array.isArray(raw.data) && raw.data.length) {
                 sectionDefinitions = raw.data.map(d => ({
                     id: String(d.id).trim(),
@@ -379,6 +458,13 @@ async function loadFromFirebase() {
             if (snapshot.exists()) {
                 const raw = snapshot.data();
                 if (Array.isArray(raw.data) && raw.data.length) {
+                    const remoteMs = firestoreUpdatedAtToMs(raw.updatedAt);
+                    const localTs = localStorage.getItem('wishNetworkSectionDefinitionsUpdatedAt');
+                    const localMs = localTs ? Date.parse(localTs) : 0;
+                    if (!Number.isNaN(localMs) && localMs > remoteMs) {
+                        return;
+                    }
+                    firebaseSectionDefinitionsLoadedAtMs = remoteMs;
                     sectionDefinitions = raw.data.map(d => ({
                         id: String(d.id).trim(),
                         label: String(d.label != null ? d.label : '').trim() || `Section ${String(d.id).trim()}`
@@ -2642,6 +2728,9 @@ async function saveData() {
     localStorage.setItem('wishNetworkSectionStudents', JSON.stringify(sectionStudents));
     localStorage.setItem('wishNetworkSectionData', JSON.stringify(sectionData));
     localStorage.setItem('wishNetworkSectionDefinitions', JSON.stringify(sectionDefinitions));
+    if (Array.isArray(sectionDefinitions) && sectionDefinitions.length > 0) {
+        localStorage.setItem('wishNetworkSectionDefinitionsUpdatedAt', new Date().toISOString());
+    }
     
     // Also save to Firebase if enabled
     // Wait a bit to ensure Firebase is initialized
@@ -2669,29 +2758,10 @@ async function loadData() {
     let flatLegacyStudents = null;
     let flatLegacyData = null;
 
-    const loadDefinitionsFromLocalStorage = () => {
-        const savedDefs = localStorage.getItem('wishNetworkSectionDefinitions');
-        if (!savedDefs) return;
-        try {
-            const parsed = JSON.parse(savedDefs);
-            if (Array.isArray(parsed) && parsed.length) {
-                sectionDefinitions = parsed.map(d => ({
-                    id: String(d.id).trim(),
-                    label: String(d.label != null ? d.label : '').trim() || `Section ${String(d.id).trim()}`
-                }));
-            }
-        } catch (e) {
-            console.warn('Could not parse wishNetworkSectionDefinitions:', e);
-        }
-    };
+    firebaseSectionDefinitionsLoadedAtMs = 0;
 
     // Try to load from Firebase first (if enabled)
     const firebaseLoaded = await loadFromFirebase();
-
-    // If Firebase has no section definitions yet, fall back to localStorage
-    if (!sectionDefinitions || sectionDefinitions.length === 0) {
-        loadDefinitionsFromLocalStorage();
-    }
 
     // Load student names from students.json file (for GitHub deployment)
     try {
@@ -2714,8 +2784,6 @@ async function loadData() {
     if (!firebaseLoaded) {
         const savedSectionStudents = localStorage.getItem('wishNetworkSectionStudents');
         const savedSectionData = localStorage.getItem('wishNetworkSectionData');
-
-        loadDefinitionsFromLocalStorage();
 
         if (savedSectionStudents) {
             const parsed = JSON.parse(savedSectionStudents);
@@ -2742,6 +2810,8 @@ async function loadData() {
             flatLegacyData = JSON.parse(savedData);
         }
     }
+
+    resolveSectionDefinitionsPreferNewer();
 
     const hadPersistedSectionDefinitions = sectionDefinitions.length > 0;
     normalizeSectionDefinitionsAfterLoad(!hadPersistedSectionDefinitions);
